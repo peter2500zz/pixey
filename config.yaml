@@ -1,0 +1,10 @@
+upstream:
+  url: "http://your-proxy:8080"   # 上游代理地址
+  username: ""                    # 上游代理账号（可选）
+  password: ""                    # 上游代理密码（可选）
+
+proxy:
+  addr: ":7070"   # 本服务代理监听端口
+
+web:
+  addr: ":7071"   # 管理页面监听端口

@@ -1,0 +1,25 @@
+# Build outputs
+/pixey
+/pixey.exe
+/dist/
+/internal/web/dist/
+
+# Runtime data
+/data/
+
+# Frontend
+/frontend/node_modules/
+/frontend/dist/
+
+# Go
+*.test
+/coverage.out
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
