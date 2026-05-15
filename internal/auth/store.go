@@ -15,6 +15,8 @@ const (
 	MaxDuration     = 7 * 24 * time.Hour
 	DefaultDuration = 30 * time.Minute
 	MaxRetention    = 24 * time.Hour
+	// NeverExpires signals a credential that never expires.
+	NeverExpires = -1 * time.Second
 )
 
 type Credential struct {
@@ -28,7 +30,12 @@ type Credential struct {
 }
 
 func (c *Credential) IsActive() bool {
-	return time.Now().Before(c.ExpiresAt)
+	// Zero ExpiresAt means never-expiring
+	return c.ExpiresAt.IsZero() || time.Now().Before(c.ExpiresAt)
+}
+
+func (c *Credential) IsNeverExpiring() bool {
+	return c.ExpiresAt.IsZero()
 }
 
 type Store struct {
@@ -84,7 +91,8 @@ func (s *Store) cleanup() {
 	var kept []*Credential
 	changed := false
 	for _, c := range s.credentials {
-		if now.After(c.CleanAt) {
+		// Never-expiring credentials have zero CleanAt — skip cleanup
+		if !c.CleanAt.IsZero() && now.After(c.CleanAt) {
 			changed = true
 		} else {
 			kept = append(kept, c)
@@ -108,11 +116,15 @@ func (s *Store) Authenticate(username, password string) bool {
 }
 
 func (s *Store) CreateCredential(duration time.Duration) (*Credential, error) {
-	if duration <= 0 {
-		duration = DefaultDuration
-	}
-	if duration > MaxDuration {
-		duration = MaxDuration
+	neverExpires := duration == NeverExpires
+
+	if !neverExpires {
+		if duration <= 0 {
+			duration = DefaultDuration
+		}
+		if duration > MaxDuration {
+			duration = MaxDuration
+		}
 	}
 
 	id, err := randStr(8, alphanumChars)
@@ -128,11 +140,6 @@ func (s *Store) CreateCredential(duration time.Duration) (*Credential, error) {
 		return nil, err
 	}
 
-	retention := duration
-	if retention > MaxRetention {
-		retention = MaxRetention
-	}
-
 	now := time.Now()
 	c := &Credential{
 		ID:        id,
@@ -140,8 +147,18 @@ func (s *Store) CreateCredential(duration time.Duration) (*Credential, error) {
 		Password:  password,
 		Duration:  duration,
 		CreatedAt: now,
-		ExpiresAt: now.Add(duration),
-		CleanAt:   now.Add(duration + retention),
+	}
+
+	if neverExpires {
+		// ExpiresAt and CleanAt remain zero — never cleaned up
+		c.Duration = NeverExpires
+	} else {
+		retention := duration
+		if retention > MaxRetention {
+			retention = MaxRetention
+		}
+		c.ExpiresAt = now.Add(duration)
+		c.CleanAt   = now.Add(duration + retention)
 	}
 
 	s.mu.Lock()
@@ -175,20 +192,32 @@ func (s *Store) RenewCredential(id string, duration time.Duration) error {
 	defer s.mu.Unlock()
 	for _, c := range s.credentials {
 		if c.ID == id {
-			if duration <= 0 {
-				duration = c.Duration
+			neverExpires := duration == NeverExpires
+			if !neverExpires {
+				if duration <= 0 {
+					duration = c.Duration
+				}
+				// Keep never-expiring if original was never-expiring and no new dur given
+				if duration == NeverExpires {
+					neverExpires = true
+				} else if duration > MaxDuration {
+					duration = MaxDuration
+				}
 			}
-			if duration > MaxDuration {
-				duration = MaxDuration
-			}
-			retention := duration
-			if retention > MaxRetention {
-				retention = MaxRetention
-			}
+
 			now := time.Now()
 			c.Duration = duration
-			c.ExpiresAt = now.Add(duration)
-			c.CleanAt = now.Add(duration + retention)
+			if neverExpires {
+				c.ExpiresAt = time.Time{}
+				c.CleanAt   = time.Time{}
+			} else {
+				retention := duration
+				if retention > MaxRetention {
+					retention = MaxRetention
+				}
+				c.ExpiresAt = now.Add(duration)
+				c.CleanAt   = now.Add(duration + retention)
+			}
 			return s.save()
 		}
 	}

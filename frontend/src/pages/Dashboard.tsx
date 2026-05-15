@@ -5,7 +5,9 @@ import { TOTPInput } from '../components/TOTPInput'
 import { CredentialCard } from '../components/CredentialCard'
 import { QRModal } from '../components/QRModal'
 import { FairyLogo, PixeyWordmark } from '../components/Logo'
+import { LangToggle } from '../components/LangToggle'
 import { type Credential, apiFetch } from '../lib/utils'
+import { useLang } from '../lib/i18n'
 
 interface Props {
   credentials: Credential[]
@@ -15,17 +17,8 @@ interface Props {
   onTotpChange: (v: string) => void
 }
 
-const DURATION_OPTS = [
-  { label: '30 min',  value: '30m',  default: true },
-  { label: '1 hour',  value: '1h'   },
-  { label: '6 hours', value: '6h'   },
-  { label: '12 hours',value: '12h'  },
-  { label: '1 day',   value: '1d'   },
-  { label: '3 days',  value: '3d'   },
-  { label: '7 days',  value: '7d'   },
-]
-
 export function Dashboard({ credentials, proxyAddr, onRefresh, totpCode, onTotpChange }: Props) {
+  const { t } = useLang()
   const [totpError, setTotpError] = useState(false)
   const [dur, setDur] = useState('30m')
   const [creating, setCreating] = useState(false)
@@ -39,10 +32,7 @@ export function Dashboard({ credentials, proxyAddr, onRefresh, totpCode, onTotpC
   }
 
   const assertTotp = () => {
-    if (totpCode.length !== 6) {
-      flash('Enter your 6-digit TOTP code first', 'err')
-      return false
-    }
+    if (totpCode.length !== 6) { flash(t.needTotp, 'err'); return false }
     return true
   }
 
@@ -58,7 +48,7 @@ export function Dashboard({ credentials, proxyAddr, onRefresh, totpCode, onTotpC
         flash(res.error, 'err')
       } else {
         setTotpError(false)
-        flash(`Created: ${res.username} / ${res.password}`, 'ok')
+        flash(t.created(res.username!, res.password!), 'ok')
         setShowCreate(false)
         onRefresh()
       }
@@ -71,14 +61,14 @@ export function Dashboard({ credentials, proxyAddr, onRefresh, totpCode, onTotpC
     if (!assertTotp()) return
     const res = await apiFetch<{ error?: string }>('DELETE', `/api/credentials/${id}`, null, totpCode)
     if (res.error) { if (res.error.includes('TOTP')) setTotpError(true); flash(res.error, 'err') }
-    else { setTotpError(false); flash('Credential deleted', 'ok'); onRefresh() }
+    else { setTotpError(false); flash(t.deleted, 'ok'); onRefresh() }
   }
 
   const renewCred = async (id: string, duration: string) => {
     if (!assertTotp()) return
     const res = await apiFetch<{ error?: string }>('PUT', `/api/credentials/${id}/renew`, { duration }, totpCode)
     if (res.error) { if (res.error.includes('TOTP')) setTotpError(true); flash(res.error, 'err') }
-    else { setTotpError(false); flash('Credential renewed', 'ok'); onRefresh() }
+    else { setTotpError(false); flash(t.renewed, 'ok'); onRefresh() }
   }
 
   const showQR = async () => {
@@ -104,14 +94,15 @@ export function Dashboard({ credentials, proxyAddr, onRefresh, totpCode, onTotpC
           <FairyLogo size={28} />
           <PixeyWordmark className="text-xl" />
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-500 bg-bg-50 border border-surface-200 rounded-lg px-2.5 py-1.5">
             <Server size={12} />
             <code className="font-mono text-accent-light">{proxyAddr}</code>
           </div>
-          <button onClick={showQR} className="btn-ghost p-2 rounded-lg border border-surface-200" title="Show TOTP QR">
+          <button onClick={showQR} className="btn-ghost p-2 rounded-lg border border-surface-200" title={t.showQR}>
             <QrCode size={15} />
           </button>
+          <LangToggle />
         </div>
       </header>
 
@@ -137,7 +128,7 @@ export function Dashboard({ credentials, proxyAddr, onRefresh, totpCode, onTotpC
 
         {/* TOTP panel */}
         <section className="card">
-          <h2 className="label mb-3">TOTP Verification</h2>
+          <h2 className="label mb-3">{t.totpTitle}</h2>
           <TOTPInput
             value={totpCode}
             onChange={v => { onTotpChange(v); setTotpError(false) }}
@@ -148,7 +139,7 @@ export function Dashboard({ credentials, proxyAddr, onRefresh, totpCode, onTotpC
         {/* Create credential */}
         <section className="card">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="label">New Credential</h2>
+            <h2 className="label">{t.newCredential}</h2>
             <button
               onClick={() => setShowCreate(v => !v)}
               className="btn-ghost p-1.5 rounded-lg border border-surface-200 text-accent-light"
@@ -168,9 +159,9 @@ export function Dashboard({ credentials, proxyAddr, onRefresh, totpCode, onTotpC
               >
                 <div className="space-y-3 pt-1">
                   <div>
-                    <label className="label">Valid for</label>
+                    <label className="label">{t.validFor}</label>
                     <div className="flex flex-wrap gap-2">
-                      {DURATION_OPTS.map(d => (
+                      {t.durations.map(d => (
                         <button
                           key={d.value}
                           onClick={() => setDur(d.value)}
@@ -185,12 +176,21 @@ export function Dashboard({ credentials, proxyAddr, onRefresh, totpCode, onTotpC
                       ))}
                     </div>
                   </div>
+                  {dur === 'never' && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      className="text-xs text-warn bg-warn/10 border border-warn/25 rounded-xl px-3 py-2.5 leading-relaxed"
+                    >
+                      {t.neverWarn}
+                    </motion.div>
+                  )}
                   <button
                     onClick={createCred}
                     disabled={creating}
                     className="btn-primary w-full justify-center disabled:opacity-50"
                   >
-                    {creating ? 'Creating…' : '+ Create credential'}
+                    {creating ? t.creating : t.createBtn}
                   </button>
                 </div>
               </motion.div>
@@ -198,18 +198,19 @@ export function Dashboard({ credentials, proxyAddr, onRefresh, totpCode, onTotpC
           </AnimatePresence>
 
           {!showCreate && (
-            <p className="text-slate-600 text-xs">
-              {activeCreds.length} active · {expiredCreds.length} expired
-            </p>
+            <p className="text-slate-600 text-xs">{t.activeCount(activeCreds.length, expiredCreds.length)}</p>
           )}
         </section>
 
         {/* Credential list */}
         {credentials.length > 0 && (
           <section className="space-y-2.5">
-            <h2 className="label px-1">
-              Credentials ({credentials.length})
-            </h2>
+            <div className="flex items-center justify-between px-1">
+              <h2 className="label">{t.credentialsTitle(credentials.length)}</h2>
+              <button onClick={onRefresh} className="text-slate-600 hover:text-slate-300 text-xs transition-colors">
+                {t.refresh}
+              </button>
+            </div>
             <AnimatePresence mode="popLayout">
               {credentials.map(c => (
                 <CredentialCard
@@ -230,13 +231,12 @@ export function Dashboard({ credentials, proxyAddr, onRefresh, totpCode, onTotpC
             className="text-center py-16 text-slate-600 space-y-2"
           >
             <FairyLogo size={40} className="mx-auto opacity-30 animate-float" />
-            <p className="text-sm">No credentials yet</p>
-            <p className="text-xs text-slate-700">Create one above to get started</p>
+            <p className="text-sm">{t.noCredentials}</p>
+            <p className="text-xs text-slate-700">{t.noCredentialsHint}</p>
           </motion.div>
         )}
       </main>
 
-      {/* QR Modal */}
       {qrModal && (
         <QRModal
           qrBase64={qrModal.qr}

@@ -203,6 +203,9 @@ func parseDuration(s string) (time.Duration, error) {
 	if s == "" {
 		return auth.DefaultDuration, nil
 	}
+	if s == "never" {
+		return auth.NeverExpires, nil
+	}
 	if len(s) > 1 && s[len(s)-1] == 'd' {
 		var n int
 		if _, err := fmt.Sscanf(s[:len(s)-1], "%d", &n); err != nil || n <= 0 {

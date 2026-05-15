@@ -4,8 +4,10 @@ import { SetupPage } from './pages/SetupPage'
 import { Dashboard } from './pages/Dashboard'
 import { apiFetch, type ApiStatus } from './lib/utils'
 import { FairyLogo } from './components/Logo'
+import { useLang } from './lib/i18n'
 
 export default function App() {
+  const { t } = useLang()
   const [status, setStatus] = useState<ApiStatus | null>(null)
   const [totpCode, setTotpCode] = useState('')
   const [loading, setLoading] = useState(true)
@@ -28,12 +30,15 @@ export default function App() {
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <motion.div
-          animate={{ y: [0, -8, 0] }}
-          transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-        >
-          <FairyLogo size={48} className="opacity-60" />
-        </motion.div>
+        <div className="flex flex-col items-center gap-3">
+          <motion.div
+            animate={{ y: [0, -8, 0] }}
+            transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            <FairyLogo size={48} className="opacity-60" />
+          </motion.div>
+          <p className="text-slate-600 text-sm">{t.loading}</p>
+        </div>
       </div>
     )
   }

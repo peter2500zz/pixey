@@ -3,7 +3,9 @@ import { motion } from 'framer-motion'
 import { ShieldCheck, Smartphone } from 'lucide-react'
 import { TOTPInput } from '../components/TOTPInput'
 import { FairyLogo, PixeyWordmark } from '../components/Logo'
+import { LangToggle } from '../components/LangToggle'
 import { apiFetch } from '../lib/utils'
+import { useLang } from '../lib/i18n'
 
 interface Props {
   qrCode: string
@@ -12,6 +14,7 @@ interface Props {
 }
 
 export function SetupPage({ qrCode, secret, onComplete }: Props) {
+  const { t } = useLang()
   const [code, setCode] = useState('')
   const [error, setError] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -32,10 +35,15 @@ export function SetupPage({ qrCode, secret, onComplete }: Props) {
 
   return (
     <div className="flex-1 flex items-center justify-center p-6 min-h-screen relative overflow-hidden">
-      {/* Background decoration */}
+      {/* Language toggle — fixed top-right corner */}
+      <div className="fixed top-4 right-4 z-50">
+        <LangToggle />
+      </div>
+
+      {/* Background blobs */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-accent/5 rounded-full blur-3xl" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-violet-soft/5 rounded-full blur-3xl" />
+        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-violet-500/5 rounded-full blur-3xl" />
       </div>
 
       <motion.div
@@ -56,14 +64,14 @@ export function SetupPage({ qrCode, secret, onComplete }: Props) {
           <div className="flex items-center justify-center gap-2 mb-1">
             <PixeyWordmark className="text-2xl" />
           </div>
-          <p className="text-slate-500 text-sm">Authenticator Setup</p>
+          <p className="text-slate-500 text-sm">{t.setupSubtitle}</p>
         </div>
 
-        {/* Steps indicator */}
+        {/* Step indicator */}
         <div className="flex items-center gap-3 mb-6">
-          <StepDot n={1} active={step === 'qr'} done={step === 'verify'} label="Scan QR" />
+          <StepDot n={1} active={step === 'qr'} done={step === 'verify'} label={t.setupStep1} />
           <div className="flex-1 h-px bg-surface-200" />
-          <StepDot n={2} active={step === 'verify'} done={false} label="Verify" />
+          <StepDot n={2} active={step === 'verify'} done={false} label={t.setupStep2} />
         </div>
 
         {step === 'qr' ? (
@@ -71,12 +79,11 @@ export function SetupPage({ qrCode, secret, onComplete }: Props) {
             key="qr"
             initial={{ opacity: 0, x: -16 }}
             animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -16 }}
             className="space-y-5"
           >
             <div className="flex items-start gap-3 bg-accent/8 border border-accent/20 rounded-xl p-4 text-sm text-slate-300">
               <Smartphone size={18} className="text-accent-light flex-shrink-0 mt-0.5" />
-              <p>Open your authenticator app (e.g., Google Authenticator, Authy) and scan the QR code below.</p>
+              <p>{t.setupScanHint}</p>
             </div>
 
             {qrCode && (
@@ -84,7 +91,7 @@ export function SetupPage({ qrCode, secret, onComplete }: Props) {
                 <div className="p-3 bg-white rounded-2xl shadow-glow">
                   <img
                     src={`data:image/png;base64,${qrCode}`}
-                    alt="TOTP QR code"
+                    alt="TOTP QR"
                     className="w-52 h-52"
                     style={{ imageRendering: 'pixelated' }}
                   />
@@ -93,17 +100,14 @@ export function SetupPage({ qrCode, secret, onComplete }: Props) {
             )}
 
             <div className="bg-bg-50 rounded-xl px-4 py-3 border border-surface-200">
-              <p className="label text-center mb-1">Manual entry</p>
+              <p className="label text-center mb-1">{t.setupManualEntry}</p>
               <p className="font-mono text-sm text-slate-200 tracking-widest text-center select-all break-all">
                 {secret}
               </p>
             </div>
 
-            <button
-              onClick={() => setStep('verify')}
-              className="btn-primary w-full justify-center"
-            >
-              I've scanned it →
+            <button onClick={() => setStep('verify')} className="btn-primary w-full justify-center">
+              {t.setupScanned}
             </button>
           </motion.div>
         ) : (
@@ -115,7 +119,7 @@ export function SetupPage({ qrCode, secret, onComplete }: Props) {
           >
             <div className="flex items-start gap-3 bg-success/8 border border-success/20 rounded-xl p-4 text-sm text-slate-300">
               <ShieldCheck size={18} className="text-success flex-shrink-0 mt-0.5" />
-              <p>Enter the 6-digit code from your authenticator app to confirm setup.</p>
+              <p>{t.setupVerifyHint}</p>
             </div>
 
             <TOTPInput
@@ -123,19 +127,19 @@ export function SetupPage({ qrCode, secret, onComplete }: Props) {
               onChange={setCode}
               error={error}
               disabled={loading}
-              label="Enter current code"
+              label={t.totpLabel}
             />
 
             <div className="flex gap-2">
               <button onClick={() => setStep('qr')} className="btn-ghost flex-1 border border-surface-200">
-                ← Back
+                {t.setupBack}
               </button>
               <button
                 onClick={confirm}
                 disabled={code.length !== 6 || loading}
                 className="btn-primary flex-1 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                {loading ? 'Verifying…' : 'Activate'}
+                {loading ? t.setupActivating : t.setupActivate}
               </button>
             </div>
           </motion.div>

@@ -1,0 +1,51 @@
+services:
+  pixey:
+    build: .
+    # 或直接使用预构建镜像:
+    # image: pixey:latest
+
+    ports:
+      - "7070:7070"   # 代理端口 — 客户端连接此处
+      - "7071:7071"   # Web 管理界面
+
+    volumes:
+      # 持久化 TOTP 密钥和凭证数据 — 必须挂载，否则重启后丢失
+      - pixey-data:/app/data
+      # 挂载配置文件（只读），修改后重启容器生效
+      - ./config.yaml:/app/config.yaml:ro
+
+    restart: unless-stopped
+
+    # ── 网络说明 ────────────────────────────────────────────────────────────────
+    #
+    # 情况 A：上游代理运行在宿主机（localhost:8080）
+    #   在 config.yaml 中将 url 写为:
+    #     url: "http://host.docker.internal:8080"
+    #   Linux 宿主机还需取消注释下方 extra_hosts：
+    #
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    #
+    # 情况 B：上游代理在远程服务器（例如 1.2.3.4:8080）
+    #   直接在 config.yaml 填写外网 IP/域名即可，无需特殊网络配置。
+    #
+    # 情况 C：需要完全使用宿主机网络栈（最简单但隔离性最差）
+    #   取消注释下面两行，并注释掉上方的 ports / extra_hosts：
+    #
+    # network_mode: "host"
+    # ─────────────────────────────────────────────────────────────────────────
+
+    environment:
+      # 可选：设置时区以使日志时间正确
+      - TZ=Asia/Shanghai
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7071/api/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  pixey-data:
+    driver: local
