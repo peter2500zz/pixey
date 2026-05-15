@@ -34,15 +34,64 @@ Client ──[user:pass]──► Pixey Proxy ──[upstream creds]──► Up
 
 ## Quick start
 
-### Prerequisites
+### Option 1: Docker (recommended — no Go or Bun required)
+
+**Prerequisites**: [Docker](https://docs.docker.com/get-docker/) and Docker Compose.
+
+```bash
+git clone <repo-url>
+cd pixey
+```
+
+Edit `config.yaml` with your upstream proxy address:
+
+```yaml
+upstream:
+  url: "http://host.docker.internal:8080"  # upstream on the host machine
+  username: ""
+  password: ""
+
+proxy:
+  addr: ":7070"
+web:
+  addr: ":7071"
+```
+
+> **Networking notes**
+> - Upstream proxy on the **host machine**: use `host.docker.internal:<port>` (`extra_hosts` is already configured in `docker-compose.yml` for Linux)
+> - Upstream proxy on a **remote server**: use its IP or hostname directly — no extra config needed
+> - Need full host networking: set `network_mode: "host"` in `docker-compose.yml`
+
+Start the service:
+
+```bash
+docker compose up -d
+```
+
+The image is built automatically on first run (~1–2 min). Then open **http://localhost:7071** to complete TOTP setup.
+
+Credential data persists in the Docker volume `pixey-data` across restarts.
+
+Useful commands:
+
+```bash
+docker compose logs -f          # stream live logs
+docker compose restart          # restart (after editing config.yaml)
+docker compose down             # stop and remove containers
+docker compose down -v          # stop and wipe all data (irreversible)
+```
+
+---
+
+### Option 2: Build from source
+
+**Prerequisites**
 
 | Tool | Version | Purpose |
 |------|---------|---------|
 | [Go](https://go.dev/dl/) | 1.22+ | Backend compiler |
 | [Bun](https://bun.sh) | 1.x | Frontend build tool & package manager |
 | `make` | any | Build orchestration |
-
-### Install & build
 
 ```bash
 git clone <repo-url>
