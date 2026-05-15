@@ -39,7 +39,7 @@ Client ──[user:pass]──► Pixey Proxy ──[upstream creds]──► Up
 **Prerequisites**: [Docker](https://docs.docker.com/get-docker/) and Docker Compose.
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/peter2500zz/pixey
 cd pixey
 ```
 
@@ -94,7 +94,7 @@ docker compose down -v          # stop and wipe all data (irreversible)
 | `make` | any | Build orchestration |
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/peter2500zz/pixey
 cd pixey
 
 # Install frontend deps and build everything
