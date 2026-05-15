@@ -3,14 +3,16 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Copy, Eye, EyeOff, RefreshCw, Trash2, Check } from 'lucide-react'
 import { type Credential, fmtDuration, copyText } from '../lib/utils'
 import { useLang } from '../lib/i18n'
+import { ProxyEnvPanel } from './ProxyEnvPanel'
 
 interface Props {
   cred: Credential
+  proxyAddr: string
   onDelete: () => void
   onRenew: (duration: string) => void
 }
 
-export function CredentialCard({ cred, onDelete, onRenew }: Props) {
+export function CredentialCard({ cred, proxyAddr, onDelete, onRenew }: Props) {
   const { t } = useLang()
   const [showPass, setShowPass] = useState(false)
   const [copiedUser, setCopiedUser] = useState(false)
@@ -106,6 +108,13 @@ export function CredentialCard({ cred, onDelete, onRenew }: Props) {
             showToggle
           />
         </div>
+
+        {/* Proxy env-var panel */}
+        <ProxyEnvPanel
+          proxyAddr={proxyAddr}
+          username={cred.username}
+          password={cred.password}
+        />
 
         {/* Renew panel */}
         <AnimatePresence>

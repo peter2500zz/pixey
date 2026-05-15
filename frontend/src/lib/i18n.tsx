@@ -24,6 +24,8 @@ export interface T {
   deleted: string; renewed: string; confirmDelete: string
   neverWarn: string
   neverBadge: string
+  proxyEnv: string
+  copied: string
 }
 
 export const translations: Record<Lang, T> = {
@@ -106,6 +108,8 @@ export const translations: Record<Lang, T> = {
     confirmDelete: '确定要删除此凭证吗？',
     neverWarn: '⚠️ 永不过期的凭证存在安全风险，一旦泄露将无法自动失效，请谨慎使用。',
     neverBadge: '永久',
+    proxyEnv: '代理环境变量',
+    copied: '已复制',
   },
 
   en: {
@@ -178,6 +182,8 @@ export const translations: Record<Lang, T> = {
     confirmDelete: 'Delete this credential?',
     neverWarn: '⚠️ Never-expiring credentials are a security risk — they stay valid indefinitely if leaked. Use with caution.',
     neverBadge: 'Permanent',
+    proxyEnv: 'Proxy env vars',
+    copied: 'Copied',
   },
 }
 

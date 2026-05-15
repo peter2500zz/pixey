@@ -216,6 +216,7 @@ export function Dashboard({ credentials, proxyAddr, onRefresh, totpCode, onTotpC
                 <CredentialCard
                   key={c.id}
                   cred={c}
+                  proxyAddr={proxyAddr}
                   onDelete={() => deleteCred(c.id)}
                   onRenew={dur => renewCred(c.id, dur)}
                 />
