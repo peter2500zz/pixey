@@ -64,15 +64,24 @@ const platforms: PlatformDef[] = [
   },
 ]
 
+function parseAddr(proxyAddr: string): { defaultHost: string; port: string } {
+  const colonIdx = proxyAddr.lastIndexOf(':')
+  if (colonIdx === -1) return { defaultHost: proxyAddr || 'localhost', port: '' }
+  const port = proxyAddr.slice(colonIdx)          // e.g. ":7070"
+  const host = proxyAddr.slice(0, colonIdx)       // "" | "localhost" | "1.2.3.4"
+  return { defaultHost: host || 'localhost', port }
+}
+
 export function ProxyEnvPanel({ proxyAddr, username, password }: Props) {
   const { t } = useLang()
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState<Platform>('bash')
   const [copied, setCopied] = useState(false)
 
-  // Normalize addr: strip leading colon if bare port
-  const host = proxyAddr.startsWith(':') ? `localhost${proxyAddr}` : proxyAddr
-  const proxyURL = `http://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}`
+  const { defaultHost, port } = parseAddr(proxyAddr)
+  const [hostInput, setHostInput] = useState(defaultHost)
+
+  const proxyURL = `http://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${hostInput || defaultHost}${port}`
 
   const current = platforms.find(p => p.id === active)!
   const snippet = current.snippet(proxyURL)
@@ -107,6 +116,22 @@ export function ProxyEnvPanel({ proxyAddr, username, password }: Props) {
             className="overflow-hidden"
           >
             <div className="pt-2.5 space-y-2">
+              {/* Host input */}
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-slate-500 shrink-0">{t.proxyHost}</label>
+                <input
+                  type="text"
+                  value={hostInput}
+                  onChange={e => setHostInput(e.target.value)}
+                  placeholder={defaultHost}
+                  spellCheck={false}
+                  className="flex-1 bg-bg-100 border border-surface-200 rounded-lg px-2.5 py-1 text-xs font-mono
+                             text-slate-200 placeholder-slate-600 focus:outline-none focus:border-accent/50
+                             transition-colors min-w-0"
+                />
+                <span className="text-xs font-mono text-slate-500 shrink-0">{port}</span>
+              </div>
+
               {/* Platform tabs */}
               <div className="flex flex-wrap gap-1">
                 {platforms.map(p => (

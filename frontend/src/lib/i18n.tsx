@@ -25,6 +25,7 @@ export interface T {
   neverWarn: string
   neverBadge: string
   proxyEnv: string
+  proxyHost: string
   copied: string
 }
 
@@ -109,6 +110,7 @@ export const translations: Record<Lang, T> = {
     neverWarn: '⚠️ 永不过期的凭证存在安全风险，一旦泄露将无法自动失效，请谨慎使用。',
     neverBadge: '永久',
     proxyEnv: '代理环境变量',
+    proxyHost: '主机地址',
     copied: '已复制',
   },
 
@@ -183,6 +185,7 @@ export const translations: Record<Lang, T> = {
     neverWarn: '⚠️ Never-expiring credentials are a security risk — they stay valid indefinitely if leaked. Use with caution.',
     neverBadge: 'Permanent',
     proxyEnv: 'Proxy env vars',
+    proxyHost: 'Host',
     copied: 'Copied',
   },
 }
