@@ -46,7 +46,7 @@ cd pixey
 
 ```yaml
 upstream:
-  url: "http://host.docker.internal:8080"  # 上游代理在宿主机时用此写法
+  url: "http://localhost:8080"  # host 网络模式下直接用 localhost
   username: ""
   password: ""
 
@@ -56,10 +56,10 @@ web:
   addr: ":7071"
 ```
 
-> **网络说明**
-> - 上游代理在**宿主机**：URL 写 `host.docker.internal:<端口>`（Linux 已在 compose 中配置好 `extra_hosts`）
-> - 上游代理在**远程服务器**：直接填外网 IP 或域名，无需额外配置
-> - 需要完全使用宿主机网络：在 `docker-compose.yml` 中改用 `network_mode: "host"`
+> **网络说明（默认：host 网络模式，仅 Linux）**
+> - 容器与宿主机共享网络栈，7070 / 7071 端口直接绑定在宿主机上
+> - 上游代理在宿主机时，URL 直接填 `http://localhost:<端口>`
+> - **macOS / Windows**：host 模式不可用，需在 `docker-compose.yml` 中改用 bridge 模式（取消注释 `ports` 与 `extra_hosts` 行，并注释掉 `network_mode`）
 
 启动服务：
 

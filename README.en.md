@@ -47,7 +47,7 @@ Edit `config.yaml` with your upstream proxy address:
 
 ```yaml
 upstream:
-  url: "http://host.docker.internal:8080"  # upstream on the host machine
+  url: "http://localhost:8080"  # with host networking, localhost = the host machine
   username: ""
   password: ""
 
@@ -57,10 +57,10 @@ web:
   addr: ":7071"
 ```
 
-> **Networking notes**
-> - Upstream proxy on the **host machine**: use `host.docker.internal:<port>` (`extra_hosts` is already configured in `docker-compose.yml` for Linux)
-> - Upstream proxy on a **remote server**: use its IP or hostname directly — no extra config needed
-> - Need full host networking: set `network_mode: "host"` in `docker-compose.yml`
+> **Networking notes (default: host network mode, Linux only)**
+> - The container shares the host network stack; ports 7070 and 7071 bind directly on the host
+> - Upstream proxy on the host machine: use `http://localhost:<port>` directly
+> - **macOS / Windows**: host networking is unavailable — switch to bridge mode in `docker-compose.yml` (uncomment `ports` and `extra_hosts`, comment out `network_mode`)
 
 Start the service:
 

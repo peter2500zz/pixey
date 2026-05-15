@@ -44,11 +44,22 @@ export async function copyText(text: string) {
 export interface Credential {
   id: string
   username: string
-  password: string
+  password?: string       // only present immediately after creation
+  label?: string
   duration: number        // nanoseconds
   created_at: string
   expires_at: string
   clean_at: string
+  bytes_up: number
+  bytes_down: number
+}
+
+export function fmtBytes(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1)
+  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`
 }
 
 export interface ApiStatus {

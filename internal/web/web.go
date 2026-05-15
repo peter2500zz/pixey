@@ -12,6 +12,33 @@ import (
 	"pixey/internal/config"
 )
 
+// publicCred is the credential shape sent to clients — password is omitted.
+type publicCred struct {
+	ID        string        `json:"id"`
+	Username  string        `json:"username"`
+	Label     string        `json:"label,omitempty"`
+	Duration  time.Duration `json:"duration"`
+	CreatedAt time.Time     `json:"created_at"`
+	ExpiresAt time.Time     `json:"expires_at"`
+	CleanAt   time.Time     `json:"clean_at"`
+	BytesUp   int64         `json:"bytes_up"`
+	BytesDown int64         `json:"bytes_down"`
+}
+
+func toPublic(c *auth.Credential) publicCred {
+	return publicCred{
+		ID:        c.ID,
+		Username:  c.Username,
+		Label:     c.Label,
+		Duration:  c.Duration,
+		CreatedAt: c.CreatedAt,
+		ExpiresAt: c.ExpiresAt,
+		CleanAt:   c.CleanAt,
+		BytesUp:   c.BytesUp,
+		BytesDown: c.BytesDown,
+	}
+}
+
 func ListenAndServe(cfg *config.Config, store *auth.Store) error {
 	mux := http.NewServeMux()
 	h := &handler{cfg: cfg, store: store}
@@ -20,6 +47,8 @@ func ListenAndServe(cfg *config.Config, store *auth.Store) error {
 	mux.HandleFunc("GET /api/status", h.apiStatus)
 	mux.HandleFunc("POST /api/setup", h.apiSetup)
 	mux.HandleFunc("POST /api/credentials", h.apiCreateCredential)
+	mux.HandleFunc("GET /api/credentials/{id}/password", h.apiRevealPassword)
+	mux.HandleFunc("PUT /api/credentials/{id}/label", h.apiSetLabel)
 	mux.HandleFunc("DELETE /api/credentials/{id}", h.apiDeleteCredential)
 	mux.HandleFunc("PUT /api/credentials/{id}/renew", h.apiRenewCredential)
 	mux.HandleFunc("GET /api/totp/qr", h.apiTOTPQR)
@@ -67,7 +96,12 @@ func (h *handler) apiStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if status == "active" {
-		resp["credentials"] = h.store.ListCredentials()
+		creds := h.store.ListCredentials()
+		pub := make([]publicCred, len(creds))
+		for i, c := range creds {
+			pub[i] = toPublic(c)
+		}
+		resp["credentials"] = pub
 	} else {
 		qr, secret, err := h.store.InitTOTP()
 		if err != nil {
@@ -129,7 +163,50 @@ func (h *handler) apiCreateCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.Info("credential created", "user", cred.Username, "expires_at", cred.ExpiresAt)
+	// Return full credential (with password) only on creation, for immediate display.
 	jsonOK(w, cred)
+}
+
+func (h *handler) apiRevealPassword(w http.ResponseWriter, r *http.Request) {
+	code := r.Header.Get("X-TOTP-Code")
+	if code == "" {
+		code = r.URL.Query().Get("code")
+	}
+	if !h.store.VerifyTOTP(code) {
+		slog.Warn("reveal password: invalid TOTP", "ip", r.RemoteAddr)
+		jsonError(w, "invalid TOTP code", http.StatusUnauthorized)
+		return
+	}
+	id := r.PathValue("id")
+	password, err := h.store.RevealPassword(id)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	slog.Info("password revealed", "id", id, "ip", r.RemoteAddr)
+	jsonOK(w, map[string]string{"password": password})
+}
+
+func (h *handler) apiSetLabel(w http.ResponseWriter, r *http.Request) {
+	if !h.totpFromRequest(r) {
+		slog.Warn("set label: invalid TOTP", "ip", r.RemoteAddr)
+		jsonError(w, "invalid TOTP code", http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		Label string `json:"label"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	id := r.PathValue("id")
+	if err := h.store.SetLabel(id, req.Label); err != nil {
+		jsonError(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	slog.Info("credential label set", "id", id, "label", req.Label)
+	jsonOK(w, map[string]string{"message": "label updated"})
 }
 
 func (h *handler) apiDeleteCredential(w http.ResponseWriter, r *http.Request) {

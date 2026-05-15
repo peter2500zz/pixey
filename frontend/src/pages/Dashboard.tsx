@@ -217,8 +217,12 @@ export function Dashboard({ credentials, proxyAddr, onRefresh, totpCode, onTotpC
                   key={c.id}
                   cred={c}
                   proxyAddr={proxyAddr}
+                  totpCode={totpCode}
                   onDelete={() => deleteCred(c.id)}
                   onRenew={dur => renewCred(c.id, dur)}
+                  onTotpError={() => setTotpError(true)}
+                  onFlash={flash}
+                  onRefresh={onRefresh}
                 />
               ))}
             </AnimatePresence>

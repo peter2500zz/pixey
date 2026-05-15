@@ -23,10 +23,13 @@ type Credential struct {
 	ID        string        `json:"id"`
 	Username  string        `json:"username"`
 	Password  string        `json:"password"`
+	Label     string        `json:"label,omitempty"`
 	Duration  time.Duration `json:"duration"`
 	CreatedAt time.Time     `json:"created_at"`
 	ExpiresAt time.Time     `json:"expires_at"`
 	CleanAt   time.Time     `json:"clean_at"`
+	BytesUp   int64         `json:"bytes_up"`
+	BytesDown int64         `json:"bytes_down"`
 }
 
 func (c *Credential) IsActive() bool {
@@ -104,15 +107,58 @@ func (s *Store) cleanup() {
 	}
 }
 
-func (s *Store) Authenticate(username, password string) bool {
+// Authenticate returns the credential ID and whether the username/password are valid.
+func (s *Store) Authenticate(username, password string) (id string, ok bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, c := range s.credentials {
 		if c.Username == username && c.Password == password && c.IsActive() {
-			return true
+			return c.ID, true
 		}
 	}
-	return false
+	return "", false
+}
+
+// RevealPassword returns the plaintext password for a credential by ID.
+func (s *Store) RevealPassword(id string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, c := range s.credentials {
+		if c.ID == id {
+			return c.Password, nil
+		}
+	}
+	return "", fmt.Errorf("credential not found")
+}
+
+// SetLabel updates the label for a credential.
+func (s *Store) SetLabel(id, label string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, c := range s.credentials {
+		if c.ID == id {
+			c.Label = label
+			return s.save()
+		}
+	}
+	return fmt.Errorf("credential not found")
+}
+
+// AddTraffic accumulates proxy traffic bytes for a credential.
+func (s *Store) AddTraffic(id string, up, down int64) {
+	if up == 0 && down == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, c := range s.credentials {
+		if c.ID == id {
+			c.BytesUp += up
+			c.BytesDown += down
+			_ = s.save()
+			return
+		}
+	}
 }
 
 func (s *Store) CreateCredential(duration time.Duration) (*Credential, error) {

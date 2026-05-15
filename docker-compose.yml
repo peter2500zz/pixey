@@ -1,12 +1,19 @@
 services:
   pixey:
     build: .
-    # 或直接使用预构建镜像:
-    # image: pixey:latest
 
-    ports:
-      - "7070:7070"   # 代理端口 — 客户端连接此处
-      - "7071:7071"   # Web 管理界面
+    # 共享宿主机网络栈（Linux 推荐）：
+    #   - 代理端口 7070 / 管理界面 7071 直接绑定到宿主机
+    #   - config.yaml 中上游代理 URL 直接填 localhost:<port> 即可
+    # macOS / Windows Docker Desktop 不支持 host 模式，需改用下方的 bridge 配置。
+    network_mode: "host"
+
+    # ── bridge 模式备用（macOS / Windows 或需要端口隔离时取消注释，并注释掉上方 network_mode）──
+    # ports:
+    #   - "7070:7070"
+    #   - "7071:7071"
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"   # Linux 访问宿主机服务时需要
 
     volumes:
       # 持久化 TOTP 密钥和凭证数据 — 必须挂载，否则重启后丢失
@@ -16,27 +23,7 @@ services:
 
     restart: unless-stopped
 
-    # ── 网络说明 ────────────────────────────────────────────────────────────────
-    #
-    # 情况 A：上游代理运行在宿主机（localhost:8080）
-    #   在 config.yaml 中将 url 写为:
-    #     url: "http://host.docker.internal:8080"
-    #   Linux 宿主机还需取消注释下方 extra_hosts：
-    #
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    #
-    # 情况 B：上游代理在远程服务器（例如 1.2.3.4:8080）
-    #   直接在 config.yaml 填写外网 IP/域名即可，无需特殊网络配置。
-    #
-    # 情况 C：需要完全使用宿主机网络栈（最简单但隔离性最差）
-    #   取消注释下面两行，并注释掉上方的 ports / extra_hosts：
-    #
-    # network_mode: "host"
-    # ─────────────────────────────────────────────────────────────────────────
-
     environment:
-      # 可选：设置时区以使日志时间正确
       - TZ=Asia/Shanghai
 
     healthcheck:

@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"pixey/internal/auth"
@@ -43,7 +45,9 @@ func (sw *statusWriter) WriteHeader(code int) {
 
 func basicAuthUser(r *http.Request) string {
 	u, _, ok := proxyBasicAuth(r)
-	if !ok { return "-" }
+	if !ok {
+		return "-"
+	}
 	return u
 }
 
@@ -54,7 +58,8 @@ type handler struct {
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	username, password, ok := proxyBasicAuth(r)
-	if !ok || !h.store.Authenticate(username, password) {
+	credID, authed := h.store.Authenticate(username, password)
+	if !ok || !authed {
 		w.Header().Set("Proxy-Authenticate", `Basic realm="Pixey"`)
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusProxyAuthRequired)
@@ -63,13 +68,13 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == http.MethodConnect {
-		h.handleConnect(w, r)
+		h.handleConnect(w, r, credID)
 	} else {
-		h.handleHTTP(w, r)
+		h.handleHTTP(w, r, credID)
 	}
 }
 
-func (h *handler) handleConnect(w http.ResponseWriter, r *http.Request) {
+func (h *handler) handleConnect(w http.ResponseWriter, r *http.Request, credID string) {
 	upstreamURL := h.cfg.UpstreamURL()
 
 	var upstream net.Conn
@@ -150,11 +155,24 @@ func (h *handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 
 	io.WriteString(client, "HTTP/1.1 200 Connection Established\r\n\r\n")
 
-	go tunnel(upstream, client)
-	go tunnel(client, upstream)
+	var up, down int64
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		tunnelCount(upstream, client, &up)
+	}()
+	go func() {
+		defer wg.Done()
+		tunnelCount(client, upstream, &down)
+	}()
+	go func() {
+		wg.Wait()
+		h.store.AddTraffic(credID, atomic.LoadInt64(&up), atomic.LoadInt64(&down))
+	}()
 }
 
-func (h *handler) handleHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *handler) handleHTTP(w http.ResponseWriter, r *http.Request, credID string) {
 	upstreamURL := h.cfg.UpstreamURL()
 
 	transport := &http.Transport{}
@@ -166,6 +184,11 @@ func (h *handler) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	out.RequestURI = ""
 	out.Header.Del("Proxy-Authorization")
 	out.Header.Del("Proxy-Connection")
+
+	var up, down int64
+	if out.Body != nil {
+		out.Body = &countReadCloser{rc: out.Body, n: &up}
+	}
 
 	resp, err := (&http.Client{
 		Transport: transport,
@@ -186,14 +209,41 @@ func (h *handler) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	io.Copy(w, &countReader{r: resp.Body, n: &down})
+
+	h.store.AddTraffic(credID, up, down)
 }
 
-func tunnel(dst, src net.Conn) {
+// tunnelCount copies from src to dst, counting bytes read from src, then closes both.
+func tunnelCount(dst, src net.Conn, n *int64) {
 	defer dst.Close()
 	defer src.Close()
-	io.Copy(dst, src)
+	io.Copy(dst, &countReader{r: src, n: n})
 }
+
+type countReader struct {
+	r io.Reader
+	n *int64
+}
+
+func (c *countReader) Read(b []byte) (int, error) {
+	n, err := c.r.Read(b)
+	atomic.AddInt64(c.n, int64(n))
+	return n, err
+}
+
+type countReadCloser struct {
+	rc io.ReadCloser
+	n  *int64
+}
+
+func (c *countReadCloser) Read(b []byte) (int, error) {
+	n, err := c.rc.Read(b)
+	*c.n += int64(n)
+	return n, err
+}
+
+func (c *countReadCloser) Close() error { return c.rc.Close() }
 
 func proxyBasicAuth(r *http.Request) (string, string, bool) {
 	const prefix = "Basic "

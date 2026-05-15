@@ -27,6 +27,14 @@ export interface T {
   proxyEnv: string
   proxyHost: string
   copied: string
+  revealPass: string
+  revealing: string
+  labelNote: string
+  labelPlaceholder: string
+  save: string
+  labelSaved: string
+  confirmDeletePrompt: string
+  confirmDeleteBtn: string
 }
 
 export const translations: Record<Lang, T> = {
@@ -112,6 +120,14 @@ export const translations: Record<Lang, T> = {
     proxyEnv: '代理环境变量',
     proxyHost: '主机地址',
     copied: '已复制',
+    revealPass: '查看密码',
+    revealing: '获取中…',
+    labelNote: '备注',
+    labelPlaceholder: '添加备注…',
+    save: '保存',
+    labelSaved: '备注已保存',
+    confirmDeletePrompt: '确定删除？',
+    confirmDeleteBtn: '确认删除',
   },
 
   en: {
@@ -187,6 +203,14 @@ export const translations: Record<Lang, T> = {
     proxyEnv: 'Proxy env vars',
     proxyHost: 'Host',
     copied: 'Copied',
+    revealPass: 'Reveal',
+    revealing: 'Fetching…',
+    labelNote: 'Note',
+    labelPlaceholder: 'Add a note…',
+    save: 'Save',
+    labelSaved: 'Note saved',
+    confirmDeletePrompt: 'Sure?',
+    confirmDeleteBtn: 'Yes, delete',
   },
 }
 
