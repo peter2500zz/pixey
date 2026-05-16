@@ -43,6 +43,14 @@ func (sw *statusWriter) WriteHeader(code int) {
 	sw.ResponseWriter.WriteHeader(code)
 }
 
+func (sw *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := sw.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("ResponseWriter does not support hijacking")
+	}
+	return hj.Hijack()
+}
+
 func basicAuthUser(r *http.Request) string {
 	u, _, ok := proxyBasicAuth(r)
 	if !ok {
