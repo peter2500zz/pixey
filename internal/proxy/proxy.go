@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"log"
 	"log/slog"
 	"net"
 	"net/http"
@@ -20,227 +19,134 @@ import (
 )
 
 func ListenAndServe(cfg *config.Config, store *auth.Store) error {
-	h := &handler{cfg: cfg, store: store}
-	logged := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		lw := &statusWriter{ResponseWriter: w, status: 200}
-		h.ServeHTTP(lw, r)
-		slog.Info("proxy", "method", r.Method, "host", r.Host,
-			"status", lw.status, "user", basicAuthUser(r),
-			"ms", time.Since(start).Milliseconds())
-	})
-	srv := &http.Server{
-		Addr:     cfg.Proxy.Addr,
-		Handler:  logged,
-		ErrorLog: log.New(slogWriter{}, "", 0),
+	ln, err := net.Listen("tcp", cfg.Proxy.Addr)
+	if err != nil {
+		return fmt.Errorf("proxy listen: %w", err)
 	}
 	slog.Info("proxy listening", "addr", cfg.Proxy.Addr)
-	return srv.ListenAndServe()
-}
-
-// slogWriter bridges http.Server.ErrorLog to slog.
-type slogWriter struct{}
-
-func (slogWriter) Write(p []byte) (int, error) {
-	slog.Error("http server", "msg", strings.TrimSpace(string(p)))
-	return len(p), nil
-}
-
-type statusWriter struct {
-	http.ResponseWriter
-	status int
-}
-
-func (sw *statusWriter) WriteHeader(code int) {
-	sw.status = code
-	sw.ResponseWriter.WriteHeader(code)
-}
-
-func (sw *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	hj, ok := sw.ResponseWriter.(http.Hijacker)
-	if !ok {
-		return nil, nil, fmt.Errorf("ResponseWriter does not support hijacking")
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return fmt.Errorf("proxy accept: %w", err)
+		}
+		go handleConn(conn, cfg, store)
 	}
-	return hj.Hijack()
 }
 
-func basicAuthUser(r *http.Request) string {
-	u, _, ok := proxyBasicAuth(r)
-	if !ok {
-		return "-"
-	}
-	return u
-}
+func handleConn(client net.Conn, cfg *config.Config, store *auth.Store) {
+	defer client.Close()
+	start := time.Now()
 
-type handler struct {
-	cfg   *config.Config
-	store *auth.Store
-}
+	br := bufio.NewReader(client)
 
-func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	username, password, ok := proxyBasicAuth(r)
-	credID, authed := h.store.Authenticate(username, password)
-	if !ok || !authed {
-		w.Header().Set("Proxy-Authenticate", `Basic realm="Pixey"`)
-		w.Header().Set("Content-Type", "text/plain")
-		w.WriteHeader(http.StatusProxyAuthRequired)
-		fmt.Fprint(w, "407 Proxy Authentication Required")
+	// Read the opening request — only to extract Proxy-Authorization.
+	req, err := http.ReadRequest(br)
+	if err != nil {
 		return
 	}
 
-	if r.Method == http.MethodConnect {
-		h.handleConnect(w, r, credID)
-	} else {
-		h.handleHTTP(w, r, credID)
+	username, password, ok := decodeBasicAuth(req.Header.Get("Proxy-Authorization"))
+	credID, authed := store.Authenticate(username, password)
+	if !ok || !authed {
+		fmt.Fprintf(client,
+			"HTTP/1.1 407 Proxy Authentication Required\r\n"+
+				"Proxy-Authenticate: Basic realm=\"Pixey\"\r\n"+
+				"Content-Length: 0\r\n\r\n")
+		slog.Info("proxy", "method", req.Method, "host", req.Host,
+			"status", 407, "user", username,
+			"ms", time.Since(start).Milliseconds())
+		return
 	}
-}
 
-func (h *handler) handleConnect(w http.ResponseWriter, r *http.Request, credID string) {
-	upstreamURL := h.cfg.UpstreamURL()
+	upstreamURL := cfg.UpstreamURL()
 
 	var upstream net.Conn
-	var err error
-
 	if upstreamURL != nil {
-		upstreamAddr := upstreamURL.Host
+		// ── Forwarding mode ────────────────────────────────────────────────
+		// Connect to the upstream proxy and hand it the (auth-swapped) request.
+		// From this point we never inspect another byte.
+		addr := upstreamURL.Host
 		if upstreamURL.Port() == "" {
-			switch upstreamURL.Scheme {
-			case "https":
-				upstreamAddr += ":443"
-			default:
-				upstreamAddr += ":80"
+			if upstreamURL.Scheme == "https" {
+				addr += ":443"
+			} else {
+				addr += ":80"
 			}
 		}
-
-		upstream, err = net.Dial("tcp", upstreamAddr)
+		upstream, err = net.Dial("tcp", addr)
 		if err != nil {
-			http.Error(w, "upstream unreachable: "+err.Error(), http.StatusBadGateway)
+			fmt.Fprintf(client, "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+			slog.Error("proxy upstream dial", "addr", addr, "err", err)
 			return
 		}
 
-		connectLine := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n", r.Host, r.Host)
+		// Swap credentials: strip Pixey's, inject upstream's (if any).
+		req.Header.Del("Proxy-Authorization")
 		if upstreamURL.User != nil {
-			password, _ := upstreamURL.User.Password()
-			creds := base64.StdEncoding.EncodeToString([]byte(upstreamURL.User.Username() + ":" + password))
-			connectLine += "Proxy-Authorization: Basic " + creds + "\r\n"
-		}
-		connectLine += "\r\n"
-
-		if _, err := io.WriteString(upstream, connectLine); err != nil {
-			upstream.Close()
-			http.Error(w, "upstream write failed", http.StatusBadGateway)
-			return
+			pass, _ := upstreamURL.User.Password()
+			enc := base64.StdEncoding.EncodeToString(
+				[]byte(upstreamURL.User.Username() + ":" + pass))
+			req.Header.Set("Proxy-Authorization", "Basic "+enc)
 		}
 
-		br := bufio.NewReaderSize(upstream, 4096)
-		resp, err := http.ReadResponse(br, nil)
-		if err != nil {
+		if err := req.WriteProxy(upstream); err != nil {
 			upstream.Close()
-			http.Error(w, "upstream response error: "+err.Error(), http.StatusBadGateway)
 			return
-		}
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			upstream.Close()
-			http.Error(w, "upstream tunnel rejected: "+resp.Status, http.StatusBadGateway)
-			return
-		}
-
-		// Drain any bytes already buffered from the upstream tunnel response.
-		if n := br.Buffered(); n > 0 {
-			buffered := make([]byte, n)
-			br.Read(buffered)
-			upstream = &prependConn{Conn: upstream, buf: bytes.NewReader(buffered)}
 		}
 	} else {
-		upstream, err = net.Dial("tcp", r.Host)
-		if err != nil {
-			http.Error(w, "connection failed: "+err.Error(), http.StatusBadGateway)
-			return
+		// ── Direct mode (no upstream proxy) ────────────────────────────────
+		// For CONNECT we dial the target and send 200 to the client ourselves.
+		// For plain HTTP we dial the target and forward the request directly.
+		// This is the only place where method matters, and only in this fallback.
+		if req.Method == http.MethodConnect {
+			upstream, err = net.Dial("tcp", req.Host)
+			if err != nil {
+				fmt.Fprintf(client, "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+				return
+			}
+			fmt.Fprintf(client, "HTTP/1.1 200 Connection Established\r\n\r\n")
+		} else {
+			host := req.URL.Hostname()
+			port := req.URL.Port()
+			if port == "" {
+				port = "80"
+			}
+			upstream, err = net.Dial("tcp", host+":"+port)
+			if err != nil {
+				fmt.Fprintf(client, "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+				return
+			}
+			req.Header.Del("Proxy-Authorization")
+			req.Header.Del("Proxy-Connection")
+			req.Close = true
+			if err := req.Write(upstream); err != nil {
+				upstream.Close()
+				return
+			}
 		}
 	}
+	defer upstream.Close()
 
-	hj, ok := w.(http.Hijacker)
-	if !ok {
-		upstream.Close()
-		http.Error(w, "hijack unsupported", http.StatusInternalServerError)
-		return
-	}
+	slog.Info("proxy", "method", req.Method, "host", req.Host,
+		"status", 200, "user", username,
+		"ms", time.Since(start).Milliseconds())
 
-	client, bufrw, err := hj.Hijack()
-	if err != nil {
-		upstream.Close()
-		slog.Error("CONNECT hijack failed", "host", r.Host, "err", err)
-		return
-	}
-
-	if _, err := io.WriteString(client, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
-		client.Close()
-		upstream.Close()
-		return
-	}
-
-	// Restore bytes the HTTP server buffered past the CONNECT request headers
-	// (e.g. TLS ClientHello sent by a client that doesn't wait for the 200).
+	// Drain bytes the bufio read ahead beyond the request headers/body.
 	var clientConn net.Conn = client
-	if n := bufrw.Reader.Buffered(); n > 0 {
+	if n := br.Buffered(); n > 0 {
 		peeked := make([]byte, n)
-		bufrw.Reader.Read(peeked)
+		br.Read(peeked)
 		clientConn = &prependConn{Conn: client, buf: bytes.NewReader(peeked)}
 	}
 
+	// Pure TCP relay — no further inspection regardless of protocol.
 	var up, down int64
-	go func() {
-		bidiTunnel(clientConn, upstream, &up, &down)
-		h.store.AddTraffic(credID, atomic.LoadInt64(&up), atomic.LoadInt64(&down))
-	}()
+	bidiTunnel(clientConn, upstream, &up, &down)
+	store.AddTraffic(credID, atomic.LoadInt64(&up), atomic.LoadInt64(&down))
 }
 
-func (h *handler) handleHTTP(w http.ResponseWriter, r *http.Request, credID string) {
-	upstreamURL := h.cfg.UpstreamURL()
-
-	transport := &http.Transport{}
-	if upstreamURL != nil {
-		transport.Proxy = http.ProxyURL(upstreamURL)
-	}
-
-	out := r.Clone(r.Context())
-	out.RequestURI = ""
-	out.Header.Del("Proxy-Authorization")
-	out.Header.Del("Proxy-Connection")
-
-	var up, down int64
-	if out.Body != nil {
-		out.Body = &countReadCloser{rc: out.Body, n: &up}
-	}
-
-	resp, err := (&http.Client{
-		Transport: transport,
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}).Do(out)
-	if err != nil {
-		http.Error(w, "upstream error: "+err.Error(), http.StatusBadGateway)
-		return
-	}
-	defer resp.Body.Close()
-
-	hdr := w.Header()
-	for k, vv := range resp.Header {
-		for _, v := range vv {
-			hdr.Add(k, v)
-		}
-	}
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, &countReader{r: resp.Body, n: &down})
-
-	h.store.AddTraffic(credID, up, down)
-}
-
-// bidiTunnel copies between a and b in both directions simultaneously.
-// It uses TCP half-close (CloseWrite) so that when one side finishes sending,
-// the other side receives a clean EOF instead of a RST.
+// bidiTunnel copies between a and b in both directions with half-close so
+// each side receives a clean EOF rather than a RST when the other side stops.
 func bidiTunnel(a, b net.Conn, aToB, bToA *int64) {
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -259,8 +165,6 @@ func bidiTunnel(a, b net.Conn, aToB, bToA *int64) {
 	b.Close()
 }
 
-// closeWrite signals EOF on the write side without closing the read side,
-// falling back to a full Close when the connection doesn't support it.
 func closeWrite(c net.Conn) {
 	type halfCloser interface{ CloseWrite() error }
 	if hc, ok := c.(halfCloser); ok {
@@ -281,22 +185,8 @@ func (c *countReader) Read(b []byte) (int, error) {
 	return n, err
 }
 
-type countReadCloser struct {
-	rc io.ReadCloser
-	n  *int64
-}
-
-func (c *countReadCloser) Read(b []byte) (int, error) {
-	n, err := c.rc.Read(b)
-	*c.n += int64(n)
-	return n, err
-}
-
-func (c *countReadCloser) Close() error { return c.rc.Close() }
-
-func proxyBasicAuth(r *http.Request) (string, string, bool) {
+func decodeBasicAuth(val string) (user, pass string, ok bool) {
 	const prefix = "Basic "
-	val := r.Header.Get("Proxy-Authorization")
 	if !strings.HasPrefix(val, prefix) {
 		return "", "", false
 	}
@@ -311,7 +201,7 @@ func proxyBasicAuth(r *http.Request) (string, string, bool) {
 	return parts[0], parts[1], true
 }
 
-// prependConn wraps a net.Conn and serves buffered bytes before the real conn.
+// prependConn serves buffered bytes before the underlying connection.
 type prependConn struct {
 	net.Conn
 	buf *bytes.Reader
