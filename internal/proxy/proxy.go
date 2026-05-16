@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"net"
 	"net/http"
@@ -28,9 +29,21 @@ func ListenAndServe(cfg *config.Config, store *auth.Store) error {
 			"status", lw.status, "user", basicAuthUser(r),
 			"ms", time.Since(start).Milliseconds())
 	})
-	srv := &http.Server{Addr: cfg.Proxy.Addr, Handler: logged}
+	srv := &http.Server{
+		Addr:     cfg.Proxy.Addr,
+		Handler:  logged,
+		ErrorLog: log.New(slogWriter{}, "", 0),
+	}
 	slog.Info("proxy listening", "addr", cfg.Proxy.Addr)
 	return srv.ListenAndServe()
+}
+
+// slogWriter bridges http.Server.ErrorLog to slog.
+type slogWriter struct{}
+
+func (slogWriter) Write(p []byte) (int, error) {
+	slog.Error("http server", "msg", strings.TrimSpace(string(p)))
+	return len(p), nil
 }
 
 type statusWriter struct {
@@ -133,7 +146,7 @@ func (h *handler) handleConnect(w http.ResponseWriter, r *http.Request, credID s
 			return
 		}
 
-		// Drain any data already buffered from the tunnel
+		// Drain any bytes already buffered from the upstream tunnel response.
 		if n := br.Buffered(); n > 0 {
 			buffered := make([]byte, n)
 			br.Read(buffered)
@@ -154,28 +167,31 @@ func (h *handler) handleConnect(w http.ResponseWriter, r *http.Request, credID s
 		return
 	}
 
-	client, _, err := hj.Hijack()
+	client, bufrw, err := hj.Hijack()
 	if err != nil {
 		upstream.Close()
-		http.Error(w, "hijack failed", http.StatusInternalServerError)
+		slog.Error("CONNECT hijack failed", "host", r.Host, "err", err)
 		return
 	}
 
-	io.WriteString(client, "HTTP/1.1 200 Connection Established\r\n\r\n")
+	if _, err := io.WriteString(client, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
+		client.Close()
+		upstream.Close()
+		return
+	}
+
+	// Restore bytes the HTTP server buffered past the CONNECT request headers
+	// (e.g. TLS ClientHello sent by a client that doesn't wait for the 200).
+	var clientConn net.Conn = client
+	if n := bufrw.Reader.Buffered(); n > 0 {
+		peeked := make([]byte, n)
+		bufrw.Reader.Read(peeked)
+		clientConn = &prependConn{Conn: client, buf: bytes.NewReader(peeked)}
+	}
 
 	var up, down int64
-	var wg sync.WaitGroup
-	wg.Add(2)
 	go func() {
-		defer wg.Done()
-		tunnelCount(upstream, client, &up)
-	}()
-	go func() {
-		defer wg.Done()
-		tunnelCount(client, upstream, &down)
-	}()
-	go func() {
-		wg.Wait()
+		bidiTunnel(clientConn, upstream, &up, &down)
 		h.store.AddTraffic(credID, atomic.LoadInt64(&up), atomic.LoadInt64(&down))
 	}()
 }
@@ -222,11 +238,36 @@ func (h *handler) handleHTTP(w http.ResponseWriter, r *http.Request, credID stri
 	h.store.AddTraffic(credID, up, down)
 }
 
-// tunnelCount copies from src to dst, counting bytes read from src, then closes both.
-func tunnelCount(dst, src net.Conn, n *int64) {
-	defer dst.Close()
-	defer src.Close()
-	io.Copy(dst, &countReader{r: src, n: n})
+// bidiTunnel copies between a and b in both directions simultaneously.
+// It uses TCP half-close (CloseWrite) so that when one side finishes sending,
+// the other side receives a clean EOF instead of a RST.
+func bidiTunnel(a, b net.Conn, aToB, bToA *int64) {
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		io.Copy(b, &countReader{r: a, n: aToB})
+		closeWrite(b)
+	}()
+	go func() {
+		defer wg.Done()
+		io.Copy(a, &countReader{r: b, n: bToA})
+		closeWrite(a)
+	}()
+	wg.Wait()
+	a.Close()
+	b.Close()
+}
+
+// closeWrite signals EOF on the write side without closing the read side,
+// falling back to a full Close when the connection doesn't support it.
+func closeWrite(c net.Conn) {
+	type halfCloser interface{ CloseWrite() error }
+	if hc, ok := c.(halfCloser); ok {
+		hc.CloseWrite()
+	} else {
+		c.Close()
+	}
 }
 
 type countReader struct {
@@ -281,4 +322,12 @@ func (p *prependConn) Read(b []byte) (int, error) {
 		return p.buf.Read(b)
 	}
 	return p.Conn.Read(b)
+}
+
+func (p *prependConn) CloseWrite() error {
+	type halfCloser interface{ CloseWrite() error }
+	if hc, ok := p.Conn.(halfCloser); ok {
+		return hc.CloseWrite()
+	}
+	return p.Conn.Close()
 }
